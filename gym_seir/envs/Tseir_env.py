@@ -2,8 +2,8 @@ import numpy as np
 import gym
 from gym import spaces
 from gym.utils import seeding
-from itertools import permutations
-class SeirEnv(gym.Env):
+
+class TSeirEnv(gym.Env):
     """
     Description:
             Each city's population is broken down into four compartments --
@@ -26,6 +26,7 @@ class SeirEnv(gym.Env):
             1       Exposed           0       Total Population
             2       Infected          0       Total Population
             3       Recovered         0       Total Population
+            4       Day               0        25
             
     
     Actions*:
@@ -62,12 +63,12 @@ class SeirEnv(gym.Env):
         sim_length = 175, 
         weight = 0.5, 
         theta = 113.92, 
-        inital_state =  [99666., 81., 138., 115.], 
+        inital_state =  [99666., 81., 138., 115., 0.], 
         state_normalization = True,
         validation = False,
         noise = False,
         noise_percent = 0):
-        super(SeirEnv, self).__init__()
+        super(TSeirEnv, self).__init__()
 
         self.dt           = discretizing_time/(24*60)
         self.Ts           = sampling_time
@@ -105,7 +106,7 @@ class SeirEnv(gym.Env):
 
         #gym action space and observation space
         self.action_space = spaces.Discrete(3)
-        self.observation_space = spaces.Box(0, np.inf, shape=(4,), dtype=np.float64)
+        self.observation_space = spaces.Box(0, np.inf, shape=(5,), dtype=np.float64)
 
         #Total number of simulation days
         self.sim_length   = sim_length
@@ -147,32 +148,35 @@ class SeirEnv(gym.Env):
             self.state = self.inital_state
         self.state_trajectory.append(list(self.state))
 
-    def normalize_state(self,state):
-        if self.state_normalization:
-            S, E, I, R = state[0], state[1], state[2], state[3]
-            S, E, I, R = S/self.popu, E/self.popu, I/self.popu, R/self.popu
-            return np.array([S, E, I, R], dtype=float)
-        else:
-            return state
-
     def random_uniform_state(self):
         S = np.random.uniform(low=0.0, high=self.popu)
         E = np.random.uniform(low=0.0, high=self.popu-S)
         I = np.random.uniform(low=0.0, high=self.popu-(S+E))
         R = self.popu-(S+E+I)
-        return np.array([S,E,I,R])
+        T = 0
+        return np.array([S,E,I,R, T])
 
     def set_state(self, state):
         err_msg = "%s is Invalid. S+E+I+R not equal to %s"  % (state, self.popu)
-        assert self.popu==sum(state), err_msg
+        assert self.popu==sum(state[:-1]), err_msg
+        err_msg = "%s should be of the form (S,E,I,R,T), where T=0" % (state)
+        assert state.shape[0]==5, err_msg
         self.state = state
     
-    def mini_step(self, rho):
+    def normalize_state(self,state):
+        if self.state_normalization:
+            S, E, I, R, T = state[0], state[1], state[2], state[3], state[4]
+            S, E, I, R, T = S/self.popu, E/self.popu, I/self.popu, R/self.popu, float(T)/float(self.sim_length)
+            return np.array([S, E, I, R, T], dtype=float)
+        else:
+            return state
+
+    def mini_step(self, rho, day):
 
         # action should be with in 0 - 2
         # 
         beta = self.theta * (self.d ** 2) * rho
-        S, E, I, R = self.state
+        S, E, I, R, T = self.state
 
         dS = - (beta) * I * S / self.popu
         dE = - dS - (self.sigma * E)
@@ -184,19 +188,18 @@ class SeirEnv(gym.Env):
         new_I = I + self.dt * dI
         new_R = R + self.dt * dR
 
-        return np.array([new_S, new_E, new_I, new_R], dtype =float)
+        return np.array([new_S, new_E, new_I, new_R, float(self.daynum)+float(day)], dtype =float)
 
     def step(self, action):
 
-        self.daynum += self.Ts
-
-        for _ in range(self.time_steps):
-            self.state = self.mini_step(self.rho[action])
+        for ts in range(self.time_steps):
+            self.state = self.mini_step(self.rho[action], day=(ts+1)*self.dt)
 
             # saving the states and actions in the memory buffers
             self.state_trajectory.append(list(self.state))
             self.action_trajectory.append(action)
             self.count += 1
+        self.daynum += self.Ts
         # Costs
         # action represent the crowd density, so decrease in crowd density increases the economic cost
         economicCost = self.eco_costs[action] * self.Ts * 0.91
@@ -224,7 +227,7 @@ class SeirEnv(gym.Env):
             S, E, I, R = self.state[0], self.state[1], self.state[2], self.state[3]
             I = (1 - (self.noise_percent / 100) ) * I
             S = (1 + (self.noise_percent / 100) ) * S
-            noisy_state = np.array([S, E, I, R], dtype =float)
+            noisy_state = np.array([S, E, I, R, self.state[4]], dtype =float)
             return self.normalize_state(noisy_state), reward, done, {}
         
     def reset(self):
