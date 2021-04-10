@@ -169,7 +169,7 @@ def plot3d_seir(log_dir, df, c):
     # plt.show()
     plt.savefig(log_dir + "3d.jpg", bbox_inches='tight')
     plt.savefig(log_dir + "3d.pdf", bbox_inches='tight')
-
+    plt.close()
 
 def plot_data(args, data, log_dir):
     STATES = data['STATES']#[:,:-1]
@@ -182,10 +182,10 @@ def plot_data(args, data, log_dir):
     POL = [a_map[a] for a in ACTIONS]
     df['A']=POL
     pal = {'LockDown':"Red", 'Social Distancing':"Green",'Open':'Blue'}
-    sns.pairplot(df, hue="A", palette=pal)
+    sns.pairplot(df, hue="A", palette=pal, alpha=0.6)
     plt.savefig(log_dir + "scatter_plot.pdf", bbox_inches='tight')
     plt.savefig(log_dir + "scatter_plot.jpg", bbox_inches='tight')
-
+    plt.close()
     COSTS = -np.array(REWARDS)
     COSTS -= np.mean(COSTS)
     COSTS /= (np.std(COSTS) + 1e-10) # normalizing the result
@@ -211,7 +211,7 @@ if __name__ == '__main__':
         'env_id' : 'gym_seir:seir-v0', # gym environment id
         'N' : 10000, # number of samples to plot
         'theta':{0: 113.92, 1: 87.15, 2: 107.97},
-        'w_all' : [0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1. ],
+        'w_all' : [0.0 , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0 ],
         'sel_w' : [0.4, 0.5, 0.6],
         'Senarios' : [ 'BaseLine', 'Senario_1', 'Senario_2'],
         'a_map' : {0:'LockDown', 1:'Social Distancing', 2:'Open'}
