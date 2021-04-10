@@ -206,7 +206,7 @@ if __name__ == '__main__':
         pass
 
     args = {
-        'n_timesteps' : 1e5, # No of RL training steps
+        'n_timesteps' : int(1e5), # No of RL training steps
         'check_freq' : 1000, # frequency of upating the model
         'env_id' : 'gym_seir:seir-v0', # gym environment id
         'N' : 10000, # number of samples to plot
