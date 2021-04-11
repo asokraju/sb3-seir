@@ -96,7 +96,7 @@ def random_uniform_state():
         states.append(list(state))
     return states
 
-def action_reward(w, log_dir, args, model, inital_state = [99666., 81., 138., 115.]):
+def action_reward(w, log_dir, args, model, inital_state):
     env_id = args['env_id']
     env_kwargs = {
         'validation':True,
