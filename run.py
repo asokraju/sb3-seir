@@ -110,6 +110,57 @@ def action_reward(w, log_dir, args, model, inital_state):
     _,r,_,_ = eval_env.step(a)
     return a, r, eval_env.state
 
+def GenerateStates(N=int(1e4)):
+    States = []
+    popu=1e5
+    for _ in range(N):
+        S = np.random.uniform(low=0.0, high=popu)
+        E = np.random.uniform(low=0.0, high=popu-S)
+        I = np.random.uniform(low=0.0, high=popu-(S+E))
+        R = popu-(S+E+I)
+        state = [S,E,I,R]
+        perms = permutations([S,E,I,R])
+        for p in perms:
+            States.append(list(p))
+    return States
+
+
+def DataGeneration(w, log_dir, args, model, States):
+    N = args['N']
+    Actions = []
+    Rewards =[]
+    next_states = []
+    env_id = args['env_id']
+    l = len(States)
+    for i, state in enumerate(States):
+        percent  = (i/l)*100
+        print("\r", "{}/{:.3f}".format(i,percent), end="")
+        env_kwargs = {
+            'validation':True,
+            'inital_state' : state,
+            'weight' : w
+            }
+        eval_env = gym.make(env_id,**env_kwargs)
+        eval_env = Monitor(eval_env, log_dir)
+        obs = eval_env.reset()
+        a = model.predict(obs, deterministic=True)[0]
+        _,r,_,_ = eval_env.step(a)
+        a, r, eval_env.state = action_reward(w, log_dir, args, model, inital_state = state)
+        Actions.append(a)
+        Rewards.append(r)
+        next_states.append(obs)
+    
+    data = {
+            'STATES' : np.array(States),
+            'ACTIONS' : np.array(Actions),
+            'REWARDS' : np.array(Rewards),
+            'NSTATES' : np.array(next_states),
+    }
+    file_name = log_dir + 'data_' + datetime.datetime.now().strftime("%y-%m-%d-%H-%M") + '.mat'
+    savemat(file_name, data)
+    print("Finished Saved the data at: {}".format(file_name))
+    return data
+
 def data_generation(w, log_dir, args, model):
     N = args['N']
     states = []
@@ -198,7 +249,7 @@ def plot_data(args, data, log_dir):
 
 if __name__ == '__main__':
     start_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
-    directory = "results/" + start_time + '/'
+    directory = "results/" + "21-04-09-16-55" + '/'
     try:
         os.mkdir("results/")
     except:
@@ -218,6 +269,7 @@ if __name__ == '__main__':
         'Senarios' : [ 'BaseLine', 'Senario_1', 'Senario_2'],
         'a_map' : {0:'LockDown', 1:'Social Distancing', 2:'Open'}
     }
+    States = GenerateStates(N=int(args['N']/16))
     for w in args['w_all']:
         dir_w = directory + str(w) +"/"
         try:
@@ -234,8 +286,10 @@ if __name__ == '__main__':
             print(dir_sen)
             start_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
             
-            model = train(w, i, args, log_dir=dir_sen)
-            data = data_generation(w, dir_sen, args, model)
+            # model = train(w, i, args, log_dir=dir_sen)
+            model = PPO.load(dir_sen+ "best_model.zip")
+            data = DataGeneration(w, dir_sen, args, model, States)
+            # data = data_generation(w, dir_sen, args, model)
             plot_data(args, data, dir_sen)
 
             end_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
