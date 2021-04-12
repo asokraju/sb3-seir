@@ -182,7 +182,7 @@ def plot_data(args, data, log_dir):
     POL = [a_map[a] for a in ACTIONS]
     df['A']=POL
     pal = {'LockDown':"Red", 'Social Distancing':"Green",'Open':'Blue'}
-    sns.pairplot(df, hue="A", palette=pal, alpha=0.6)
+    sns.pairplot(df, hue="A", palette=pal)
     plt.savefig(log_dir + "scatter_plot.pdf", bbox_inches='tight')
     plt.savefig(log_dir + "scatter_plot.jpg", bbox_inches='tight')
     plt.close()
@@ -201,10 +201,12 @@ if __name__ == '__main__':
     directory = "results/" + start_time + '/'
     try:
         os.mkdir("results/")
+    except:
+        pass
+    try:
         os.mkdir(directory)
     except:
         pass
-
     args = {
         'n_timesteps' : int(1e5), # No of RL training steps
         'check_freq' : 1000, # frequency of upating the model
