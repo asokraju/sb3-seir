@@ -1,5 +1,7 @@
 import datetime
 import os
+from os import walk, listdir
+
 import numpy as np
 import gym
 import time
@@ -17,7 +19,9 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
-
+import plotly
+import plotly.graph_objs as go 
+import plotly.express as px
 # Without this I get some errors/wwarnings. It is only for my local computer
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
@@ -193,14 +197,14 @@ def plot3d_seir(log_dir, df, c):
     colors = sns.color_palette("Paired").as_hex()
     cmap = ListedColormap([colors[5],colors[1],colors[3]])
     # print([colors[3],colors[0],colors[2]])
-    S = df['S']
-    E = df['E']
-    I = df['I']
+    S = df['Susceptible']
+    E = df['Exposed']
+    I = df['Infected']
     # plot
     sc = ax.scatter(S, E, I, s=df['costs'], c=c, marker='o', alpha=0.6, cmap=cmap)
-    ax.set_xlabel('S')
-    ax.set_ylabel('E')
-    ax.set_zlabel('I')
+    ax.set_xlabel('Susceptible')
+    ax.set_ylabel('Exposed')
+    ax.set_zlabel('Infected')
     x = np.linspace(0., 1e5,1000)
     y = 1e5-x
     zeros = np.zeros(x.shape)
@@ -218,25 +222,33 @@ def plot3d_seir(log_dir, df, c):
     plt.legend(*sc.legend_elements(), bbox_to_anchor=(0.9, 0.9), loc=2)
     ax.view_init(azim=40, elev=0)
     # plt.show()
-    plt.savefig(log_dir + "3d.jpg", bbox_inches='tight')
-    plt.savefig(log_dir + "3d.pdf", bbox_inches='tight')
+    plt.savefig(log_dir + "3d_new.jpg", bbox_inches='tight')
+    # plt.savefig(log_dir + "3d_new.pdf", bbox_inches='tight')
     plt.close()
 
-def plot_data(args, data, log_dir):
+def plot_data(args, data, log_dir, title):
     STATES = data['STATES']#[:,:-1]
     ACTIONS = data['ACTIONS']
+    if np.shape(ACTIONS)[0]==1:
+        ACTIONS = ACTIONS[0]
     REWARDS = data['REWARDS']
     NSTATES = data['NSTATES']
-    col = ['S', 'E', 'I', 'R']
+    col = ['Susceptible', 'Exposed', 'Infected', 'Recovered']
     df = pd.DataFrame(STATES, columns=col)
     a_map = args['a_map']
     POL = [a_map[a] for a in ACTIONS]
-    df['A']=POL
+    df['Policy']=POL
+    plot_kws={'alpha': 0.6}
+    hue_order = ['LockDown','Social Distancing', 'Open']
     pal = {'LockDown':"Red", 'Social Distancing':"Green",'Open':'Blue'}
-    sns.pairplot(df, hue="A", palette=pal)
-    plt.savefig(log_dir + "scatter_plot.pdf", bbox_inches='tight')
-    plt.savefig(log_dir + "scatter_plot.jpg", bbox_inches='tight')
-    plt.close()
+    # g = sns.pairplot(df, kind='scatter', alpha=0.1})
+    g = sns.pairplot(df, hue="Policy",  palette=pal, plot_kws = plot_kws, hue_order = hue_order)
+    # g.set_title(title)
+    # g.title(title)
+    # g.savefig(log_dir + "scatter_plot_new.pdf", bbox_inches='tight')
+    g.savefig(log_dir + "scatter_plot_new7.jpg", bbox_inches='tight')
+    # g.close()
+
     COSTS = -np.array(REWARDS)
     COSTS -= np.mean(COSTS)
     COSTS /= (np.std(COSTS) + 1e-10) # normalizing the result
@@ -245,7 +257,191 @@ def plot_data(args, data, log_dir):
     df['costs']=COSTS[0]
     plot3d_seir(log_dir, df,ACTIONS)
 
+def Trajectories(w, log_dir, args, model, inital_state, Senario):
+    env_id = args['env_id']
+    done = False
+    env_kwargs = {
+        'validation':True,
+        'inital_state' : inital_state,
+        'weight' : w
+    }
+    done = False
+    eval_env = gym.make(env_id,**env_kwargs)
+    eval_env = Monitor(eval_env, log_dir)
+    obs = eval_env.reset()
+    while not done:
+        a = model.predict(obs, deterministic=True)[0]
+        obs,r,done,_ = eval_env.step(a)
+    States = eval_env.state_trajectory[:-1]
+    Actions = eval_env.action_trajectory
+    # Rewards = eval_env.rewards
+    # print(eval_env.rewards, eval_env.weekly_rewards)
+    WeeklyRewards = eval_env.weekly_rewards
+    Rewards = [r for r in WeeklyRewards for _ in range(eval_env.time_steps)]
+    index = pd.date_range("2020-05-15 00:00:00", "2020-11-05 23:55:00", freq="5min")
+    col = ['Susceptible', 'Exposed', 'Infected', 'Recovered']
+    df = pd.DataFrame(States, columns=col, index = index)
+    df['Policy'] = Actions
+    df['Rewards'] = Rewards
+    title_sen = ['BaseLine', 'First', 'Second']
+    fig = go.Figure([{
+        'x': index,#S.index,
+        'y': df[col],
+        'name': col
+    }  for col in ['Susceptible', 'Exposed', 'Infected', 'Recovered']])
+    fig.update_layout(
+        title= "States, " + "%s - Senario"%title_sen[Senario] + ". w = %s"%w,
+        xaxis_title="Time - months",
+        yaxis_title="No. of people",
+        legend_title="States",
+        font=dict(
+            family="Courier New, monospace",
+            size=15,
+            color="RebeccaPurple"
+        )
+    )
+    # fig.show()
+    fig.write_image(log_dir + "States.pdf")
+    fig.write_image(log_dir + "States.jpeg")
+    fig.write_image(log_dir + "States.png")
+    plotly.offline.plot(fig, filename=log_dir + 'States.html')
 
+    fig = go.Figure([{
+        'x': index,#S.index,
+        'y': df.Rewards,
+        'name': 'Rewards'
+    } ])
+    fig.update_layout(
+        title="Rewards," + " %s - Senario"%title_sen[Senario] + ". w = %s"%w,
+        xaxis_title="Time - months",
+        yaxis_title="Rewards",
+        # legend_title="States",
+        font=dict(
+            family="Courier New, monospace",
+            size=15,
+            color="RebeccaPurple"
+        )
+    )
+    fig.write_image(log_dir + "Rewards.pdf")
+    fig.write_image(log_dir + "Rewards.jpeg")
+    fig.write_image(log_dir + "Rewards.png")
+    plotly.offline.plot(fig, filename='Actions.html')
+
+    fig = go.Figure([{
+        'x': index,#S.index,
+        'y': df.Policy,
+        'name': 'Policy'
+    } ])
+    fig.update_layout(
+        title="Policy: 0-Open, 1-Social Distancing, 2-Lockdown." + " %s - Senario"%title_sen[Senario] + ". w = %s"%w,
+        xaxis_title="Time - months",
+        yaxis_title="Actions",
+        yaxis_range=[-0.2, 2.2],
+        # legend_title="States",
+        font=dict(
+            family="Courier New, monospace",
+            size=15,
+            color="RebeccaPurple"
+        )
+    )
+    fig.write_image(log_dir + "Actions.pdf")
+    fig.write_image(log_dir + "Actions.jpeg")
+    fig.write_image(log_dir + "Actions.png")
+    plotly.offline.plot(fig, filename=log_dir + 'Rewards.html')  
+
+
+
+def Trajectories_comparision(w, log_dir, args, model, inital_state):
+    env_id = args['env_id']
+    done = False
+    env_kwargs = {
+        'validation':True,
+        'inital_state' : inital_state,
+        'weight' : w
+    }
+    done = False
+    eval_env = gym.make(env_id,**env_kwargs)
+    eval_env = Monitor(eval_env, log_dir)
+    obs = eval_env.reset()
+    while not done:
+        a = model.predict(obs, deterministic=True)[0]
+        obs,r,done,_ = eval_env.step(a)
+    States = eval_env.state_trajectory[:-1]
+    Actions = eval_env.action_trajectory
+    # Rewards = eval_env.rewards
+    # print(eval_env.rewards, eval_env.weekly_rewards)
+    WeeklyRewards = eval_env.weekly_rewards
+    Rewards = [r for r in WeeklyRewards for _ in range(eval_env.time_steps)]
+    index = pd.date_range("2020-05-15 00:00:00", "2020-11-05 23:55:00", freq="5min")
+    col = ['Susceptible', 'Exposed', 'Infected', 'Recovered']
+    df = pd.DataFrame(States, columns=col, index = index)
+    df['Policy'] = Actions
+    df['Rewards'] = Rewards
+
+    fig = go.Figure([{
+        'x': index,#S.index,
+        'y': df[col],
+        'name': col
+    }  for col in ['Susceptible', 'Exposed', 'Infected', 'Recovered']])
+    fig.update_layout(
+        title="w = %s"%w,
+        xaxis_title="Time - months",
+        yaxis_title="No. of people",
+        legend_title="States",
+        font=dict(
+            family="Courier New, monospace",
+            size=15,
+            color="RebeccaPurple"
+        )
+    )
+    # fig.show()
+    fig.write_image(log_dir + "States.pdf")
+    fig.write_image(log_dir + "States.jpeg")
+    fig.write_image(log_dir + "States.png")
+    plotly.offline.plot(fig, filename=log_dir + 'States.html')
+
+    fig = go.Figure([{
+        'x': index,#S.index,
+        'y': df.Rewards,
+        'name': 'Rewards'
+    } ])
+    fig.update_layout(
+        title="Rewards",
+        xaxis_title="Time - months",
+        yaxis_title="Rewards",
+        # legend_title="States",
+        font=dict(
+            family="Courier New, monospace",
+            size=15,
+            color="RebeccaPurple"
+        )
+    )
+    fig.write_image(log_dir + "Actions.pdf")
+    fig.write_image(log_dir + "Actions.jpeg")
+    fig.write_image(log_dir + "Actions.png")
+    plotly.offline.plot(fig, filename='Actions.html')
+
+    fig = go.Figure([{
+        'x': index,#S.index,
+        'y': df.Policy,
+        'name': 'Policy'
+    } ])
+    fig.update_layout(
+        title="0-Open, 1-Social Distancing, 2-Lockdown",
+        xaxis_title="Time - months",
+        yaxis_title="Actions",
+        yaxis_range=[0, 2],
+        # legend_title="States",
+        font=dict(
+            family="Courier New, monospace",
+            size=15,
+            color="RebeccaPurple"
+        )
+    )
+    fig.write_image(log_dir + "Rewards.pdf")
+    fig.write_image(log_dir + "Rewards.jpeg")
+    fig.write_image(log_dir + "Rewards.png")
+    plotly.offline.plot(fig, filename=log_dir + 'Rewards.html')  
 
 if __name__ == '__main__':
     start_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
@@ -267,7 +463,12 @@ if __name__ == '__main__':
         'w_all' : [0.0 , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0 ],
         'sel_w' : [0.4, 0.5, 0.6],
         'Senarios' : [ 'BaseLine', 'Senario_1', 'Senario_2'],
-        'a_map' : {0:'LockDown', 1:'Social Distancing', 2:'Open'}
+        'a_map' : {0:'LockDown', 1:'Social Distancing', 2:'Open'},
+        'initial_state':{
+            0:[99666., 81., 138., 115.], 
+            1:[99962.0, 7.0, 14.0, 17.0],
+            2:[99905.0, 22.0, 39.0, 34.0]
+            }
     }
     States = GenerateStates(N=int(args['N']/16))
     for w in args['w_all']:
@@ -285,14 +486,39 @@ if __name__ == '__main__':
                 pass
             print(dir_sen)
             start_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
-            
-            # model = train(w, i, args, log_dir=dir_sen)
-            model = PPO.load(dir_sen+ "best_model.zip")
-            data = DataGeneration(w, dir_sen, args, model, States)
-            # data = data_generation(w, dir_sen, args, model)
-            plot_data(args, data, dir_sen)
 
-            end_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
-            print(start_time, end_time)
+            # training the model
+            # model = train(w, i, args, log_dir=dir_sen)
+
+            # Load the trained model
+            model = PPO.load(dir_sen+ "best_model.zip")
+
+            # Generate the data
+            # data = DataGeneration(w, dir_sen, args, model, States)
+            # data = data_generation(w, dir_sen, args, model)
+
+            # load the generated data
+            # for f in listdir(dir_sen):
+            #     if f.endswith('.' + 'mat'):
+            #         mat_file_names = dir_sen+ "/" + f
+            # print(mat_file_names)
+            # data = loadmat(mat_file_names)
+
+            # # ploting the data
+            plots_dir = dir_sen + "plots-" + "w=%s"%w +"-%s"%senario + "/"
+            try:
+                os.mkdir(plots_dir)
+            except:
+                pass
+            # if i==0:
+            #     title = "w={}".format(w) + ", Baseline"
+            # elif i==1:
+            #     title = "w={}".format(w) + ", Senario - 1"
+            # elif i==2:
+            #     title = "w={}".format(w) + ", Senario - 2"
+            # plot_data(args, data, dir_sen, title=title)
+            Trajectories(w, plots_dir, args, model, inital_state=args['initial_state'][i], Senario=i)
+            # end_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
+            # print(start_time, end_time)
 
 
