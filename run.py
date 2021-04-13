@@ -22,6 +22,9 @@ from mpl_toolkits.mplot3d import Axes3D
 import plotly
 import plotly.graph_objs as go 
 import plotly.express as px
+from plotly.subplots import make_subplots
+from plotly.offline import iplot
+
 # Without this I get some errors/wwarnings. It is only for my local computer
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
@@ -350,98 +353,95 @@ def Trajectories(w, log_dir, args, model, inital_state, Senario):
     plotly.offline.plot(fig, filename=log_dir + 'Rewards.html')  
 
 
+def Trajectories_Comparision(w, log_dir, args, model):
+    subplot_titles=(
+        "BaseLine Senario: States", 
+        "BaseLine Senario: Reward",
+        "BaseLine Senario: Actions",
+        "First Senario: States", 
+        "First Senario: Reward",
+        "First Senario: Actions",
+        "Second Senario: States", 
+        "Second Senario: Reward",
+        "Second Senario: Actions")
+    fig = make_subplots(rows=3, cols=3, subplot_titles=subplot_titles)
+    title_sen = ['BaseLine', 'First', 'Second']
+    for i, senario in enumerate(args['Senarios']):
+        env_id = args['env_id']
+        done = False
+        env_kwargs = {
+            'validation':True,
+            'inital_state' : args['initial_state'][i],
+            'weight' : w
+        }
+        done = False
+        eval_env = gym.make(env_id,**env_kwargs)
+        eval_env = Monitor(eval_env, log_dir)
+        obs = eval_env.reset()
+        while not done:
+            a = model.predict(obs, deterministic=True)[0]
+            obs,r,done,_ = eval_env.step(a)
+        States = eval_env.state_trajectory[:-1]
+        Actions = eval_env.action_trajectory
+        # Rewards = eval_env.rewards
+        # print(eval_env.rewards, eval_env.weekly_rewards)
+        WeeklyRewards = eval_env.weekly_rewards
+        Rewards = [r for r in WeeklyRewards for _ in range(eval_env.time_steps)]
+        index = pd.date_range("2020-05-15 00:00:00", "2020-11-05 23:55:00", freq="5min")
+        col = ['Susceptible', 'Exposed', 'Infected', 'Recovered']
+        df = pd.DataFrame(States, columns=col, index = index)
+        df['Policy'] = Actions
+        df['Rewards'] = Rewards
+        df['time'] = np.arange(0,np.shape(Actions)[0])* (25./np.shape(Actions)[0])
+        print(np.shape(df.time.values), np.shape(df['Susceptible'].values))
+        trace_S = go.Scatter(
+                    x = df.time.values,
+                    y = df['Susceptible'].values,
+                    name = title_sen[i] + ': Susceptible')
+        trace_E = go.Scatter(
+                    x = df.time.values,
+                    y = df['Exposed'].values,
+                    name = title_sen[i] + ': Exposed')
+        trace_I = go.Scatter(
+                    x = df.time.values,
+                    y = df['Infected'].values,
+                    name = title_sen[i] + ': Infected')
+        trace_R = go.Scatter(
+                    x = df.time.values,
+                    y = df['Recovered'].values,
+                    name = title_sen[i] + ': Recovered')
+        trace2 = go.Scatter(
+                    x = df.time.values,
+                    y = df.Rewards.values,
+                    name = title_sen[i] + ': Rewards'
+                    )
+        trace3 = go.Scatter(
+                    x = df.time.values,
+                    y = df.Policy.values,
+                    name = title_sen[i] + ':Policy'
+                    )
+        fig.add_trace(trace_S,row = i+1, col =1)
+        fig.add_trace(trace_E,row = i+1, col =1)
+        fig.add_trace(trace_I,row = i+1, col =1)
+        fig.add_trace(trace_R,row = i+1, col =1)
+        fig.update_xaxes(title_text="Weeks", row=i+1, col=1)
+        fig.update_yaxes(title_text="Population", row=i+1, col=1)
 
-def Trajectories_comparision(w, log_dir, args, model, inital_state):
-    env_id = args['env_id']
-    done = False
-    env_kwargs = {
-        'validation':True,
-        'inital_state' : inital_state,
-        'weight' : w
-    }
-    done = False
-    eval_env = gym.make(env_id,**env_kwargs)
-    eval_env = Monitor(eval_env, log_dir)
-    obs = eval_env.reset()
-    while not done:
-        a = model.predict(obs, deterministic=True)[0]
-        obs,r,done,_ = eval_env.step(a)
-    States = eval_env.state_trajectory[:-1]
-    Actions = eval_env.action_trajectory
-    # Rewards = eval_env.rewards
-    # print(eval_env.rewards, eval_env.weekly_rewards)
-    WeeklyRewards = eval_env.weekly_rewards
-    Rewards = [r for r in WeeklyRewards for _ in range(eval_env.time_steps)]
-    index = pd.date_range("2020-05-15 00:00:00", "2020-11-05 23:55:00", freq="5min")
-    col = ['Susceptible', 'Exposed', 'Infected', 'Recovered']
-    df = pd.DataFrame(States, columns=col, index = index)
-    df['Policy'] = Actions
-    df['Rewards'] = Rewards
+        fig.add_trace(trace2,row = i+1, col =2)
+        fig.update_xaxes(title_text="Weeks", row=i+1, col=2)
+        fig.update_yaxes(title_text="Reward", row=i+1, col=2)
 
-    fig = go.Figure([{
-        'x': index,#S.index,
-        'y': df[col],
-        'name': col
-    }  for col in ['Susceptible', 'Exposed', 'Infected', 'Recovered']])
-    fig.update_layout(
-        title="w = %s"%w,
-        xaxis_title="Time - months",
-        yaxis_title="No. of people",
-        legend_title="States",
-        font=dict(
-            family="Courier New, monospace",
-            size=15,
-            color="RebeccaPurple"
-        )
-    )
-    # fig.show()
-    fig.write_image(log_dir + "States.pdf")
-    fig.write_image(log_dir + "States.jpeg")
-    fig.write_image(log_dir + "States.png")
-    plotly.offline.plot(fig, filename=log_dir + 'States.html')
+        fig.add_trace(trace3,row = i+1, col =3)
+        fig.update_xaxes(title_text="Weeks", row=i+1, col=3)
+        fig.update_yaxes(title_text="Actions", range=[-0.2, 2.2], row=i+1, col=3)
 
-    fig = go.Figure([{
-        'x': index,#S.index,
-        'y': df.Rewards,
-        'name': 'Rewards'
-    } ])
-    fig.update_layout(
-        title="Rewards",
-        xaxis_title="Time - months",
-        yaxis_title="Rewards",
-        # legend_title="States",
-        font=dict(
-            family="Courier New, monospace",
-            size=15,
-            color="RebeccaPurple"
-        )
-    )
-    fig.write_image(log_dir + "Actions.pdf")
-    fig.write_image(log_dir + "Actions.jpeg")
-    fig.write_image(log_dir + "Actions.png")
-    plotly.offline.plot(fig, filename='Actions.html')
-
-    fig = go.Figure([{
-        'x': index,#S.index,
-        'y': df.Policy,
-        'name': 'Policy'
-    } ])
-    fig.update_layout(
-        title="0-Open, 1-Social Distancing, 2-Lockdown",
-        xaxis_title="Time - months",
-        yaxis_title="Actions",
-        yaxis_range=[0, 2],
-        # legend_title="States",
-        font=dict(
-            family="Courier New, monospace",
-            size=15,
-            color="RebeccaPurple"
-        )
-    )
-    fig.write_image(log_dir + "Rewards.pdf")
-    fig.write_image(log_dir + "Rewards.jpeg")
-    fig.write_image(log_dir + "Rewards.png")
-    plotly.offline.plot(fig, filename=log_dir + 'Rewards.html')  
+    fig['layout'].update(height = 1500, width = 1500, title = 'Comparing Senarios for w=%s'%w)
+    filename = "Comparision-" + 'w=%s'%w
+    fig.write_image(log_dir +filename +".pdf")
+    fig.write_image(log_dir + filename+".jpeg")
+    fig.write_image(log_dir + filename+".png")
+    plotly.offline.plot(fig, filename=log_dir + filename+'.html') 
+    iplot(fig)
 
 if __name__ == '__main__':
     start_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
@@ -517,8 +517,9 @@ if __name__ == '__main__':
             # elif i==2:
             #     title = "w={}".format(w) + ", Senario - 2"
             # plot_data(args, data, dir_sen, title=title)
-            Trajectories(w, plots_dir, args, model, inital_state=args['initial_state'][i], Senario=i)
+            # Trajectories(w, plots_dir, args, model, inital_state=args['initial_state'][i], Senario=i)
             # end_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
             # print(start_time, end_time)
+        Trajectories_Comparision(w, dir_w, args, model)
 
 
