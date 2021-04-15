@@ -27,6 +27,7 @@ from plotly.offline import iplot
 
 # Without this I get some errors/wwarnings. It is only for my local computer
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+from sklearn.metrics import confusion_matrix
 
 class SaveOnBestTrainingRewardCallback(BaseCallback):
     """
@@ -353,7 +354,7 @@ def Trajectories(w, log_dir, args, model, inital_state, Senario):
     plotly.offline.plot(fig, filename=log_dir + 'Rewards.html')  
 
 
-def Trajectories_Comparision(w, log_dir, args, model):
+def Trajectories_Comparision(w, dir_w, args, plot_dir):
     subplot_titles=(
         "BaseLine Senario: States", 
         "BaseLine Senario: Reward",
@@ -366,12 +367,18 @@ def Trajectories_Comparision(w, log_dir, args, model):
         "Second Senario: Actions")
     fig = make_subplots(rows=3, cols=3, subplot_titles=subplot_titles)
     title_sen = ['BaseLine', 'First', 'Second']
+    index_num = [int(i) for i in np.arange(0,6, dtype=int)*50400/6]
+    index = pd.date_range("2020-05-15 00:00:00", "2020-11-05 23:55:00", freq="5min")
+    dates = [index[int(i)].strftime('%B %d') for i in index_num]
     for i, senario in enumerate(args['Senarios']):
+        log_dir = dir_w + senario + "/"
+        model = PPO.load(log_dir+ "best_model.zip")
         env_id = args['env_id']
         done = False
         env_kwargs = {
             'validation':True,
-            'inital_state' : args['initial_state'][i],
+            # 'inital_state' : args['initial_state'][0],
+            'inital_state':args['initial_state_lockdown']['2a'],
             'weight' : w
         }
         done = False
@@ -387,13 +394,12 @@ def Trajectories_Comparision(w, log_dir, args, model):
         # print(eval_env.rewards, eval_env.weekly_rewards)
         WeeklyRewards = eval_env.weekly_rewards
         Rewards = [r for r in WeeklyRewards for _ in range(eval_env.time_steps)]
-        index = pd.date_range("2020-05-15 00:00:00", "2020-11-05 23:55:00", freq="5min")
         col = ['Susceptible', 'Exposed', 'Infected', 'Recovered']
         df = pd.DataFrame(States, columns=col, index = index)
         df['Policy'] = Actions
         df['Rewards'] = Rewards
-        df['time'] = np.arange(0,np.shape(Actions)[0])* (25./np.shape(Actions)[0])
-        print(np.shape(df.time.values), np.shape(df['Susceptible'].values))
+        df['time'] = np.arange(0,np.shape(Actions)[0])#* (25./np.shape(Actions)[0])
+        df['weeks'] = np.arange(0,np.shape(Actions)[0])* (25./np.shape(Actions)[0])
         trace_S = go.Scatter(
                     x = df.time.values,
                     y = df['Susceptible'].values,
@@ -434,15 +440,67 @@ def Trajectories_Comparision(w, log_dir, args, model):
         fig.add_trace(trace3,row = i+1, col =3)
         fig.update_xaxes(title_text="Weeks", row=i+1, col=3)
         fig.update_yaxes(title_text="Actions", range=[-0.2, 2.2], row=i+1, col=3)
-
+    
+    fig.update_layout(
+                xaxis1 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis2 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis3 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis4 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis5 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis6 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis7 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis8 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                xaxis9 = dict(tickmode = 'array',tickvals=index_num,ticktext=dates),
+                yaxis1 = dict(showexponent = 'all', exponentformat = 'e'),
+                yaxis2 = dict(showexponent = 'all', exponentformat = 'e'),
+                yaxis4 = dict(showexponent = 'all', exponentformat = 'e'),
+                yaxis5 = dict(showexponent = 'all', exponentformat = 'e'),
+                yaxis7 = dict(showexponent = 'all', exponentformat = 'e'),
+                yaxis8 = dict(showexponent = 'all', exponentformat = 'e')
+                )
     fig['layout'].update(height = 1500, width = 1500, title = 'Comparing Senarios for w=%s'%w)
-    filename = "Comparision-" + 'w=%s'%w
-    fig.write_image(log_dir +filename +".pdf")
-    fig.write_image(log_dir + filename+".jpeg")
-    fig.write_image(log_dir + filename+".png")
-    plotly.offline.plot(fig, filename=log_dir + filename+'.html') 
+    filename = "Comparision-" + 'w=%s'%w +'2a'
+    fig.write_image(plot_dir +filename +".pdf")
+    fig.write_image(plot_dir + filename+".jpeg")
+    fig.write_image(plot_dir + filename+".png")
+    plotly.offline.plot(fig, filename=plot_dir + filename+'.html') 
     iplot(fig)
 
+def normalize_state(state):
+    popu = 1e5
+    S, E, I, R = state[0], state[1], state[2], state[3]
+    S, E, I, R = S/popu, E/popu, I/popu, R/popu
+    return np.array([S, E, I, R], dtype=float)
+
+def plot_confusion_matrix(w, dir_w, args):
+    States = GenerateStates(N=int(args['N']))
+    col = ['Susceptible', 'Exposed', 'Infected', 'Recovered']
+    df = pd.DataFrame(States, columns=col)
+    Senarios = args['Senarios']#[ 'BaseLine', 'Senario_1', 'Senario_2']
+    for i, senario in enumerate(args['Senarios']):
+        log_dir = dir_w + senario + "/"
+        model = PPO.load(log_dir+ "best_model.zip")
+        A = []
+        for state in States:
+            a = model.predict(normalize_state(state), deterministic=True)[0]
+            A.append(a)
+        df[Senarios[i]] = A
+    print(df.head())
+    df.to_csv(dir_w+'actions.csv')
+    C1 = confusion_matrix(y_true = df['BaseLine'], y_pred = df['Senario_1'], labels = [0,1,2])
+    C2 = confusion_matrix(y_true = df['BaseLine'], y_pred = df['Senario_2'], labels = [0,1,2])
+    print(C1)
+    print(C2)
+    sns.heatmap(C1*(100/np.shape(States)[0]), annot=True)
+    plt.savefig(dir_w + "Confusion_Matrix1.jpg", bbox_inches='tight')
+    plt.savefig(dir_w + "Confusion_Matrix1.pdf", bbox_inches='tight')
+    C1 = pd.DataFrame(C1)
+    C1.to_csv(dir_w+'C1.csv')
+    sns.heatmap(C2*(100/np.shape(States)[0]), annot=True)
+    plt.savefig(dir_w + "Confusion_Matrix2.jpg", bbox_inches='tight')
+    plt.savefig(dir_w + "Confusion_Matrix2.pdf", bbox_inches='tight')
+    C2 = pd.DataFrame(C2)
+    C2.to_csv(dir_w+'C2.csv')
 if __name__ == '__main__':
     start_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
     directory = "results/" + "21-04-09-16-55" + '/'
@@ -461,17 +519,23 @@ if __name__ == '__main__':
         'N' : 10000, # number of samples to plot
         'theta':{0: 113.92, 1: 87.15, 2: 107.97},
         'w_all' : [0.0 , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0 ],
-        'sel_w' : [0.4, 0.5, 0.6],
+        'sel_w' : [0.5],
         'Senarios' : [ 'BaseLine', 'Senario_1', 'Senario_2'],
         'a_map' : {0:'LockDown', 1:'Social Distancing', 2:'Open'},
         'initial_state':{
             0:[99666., 81., 138., 115.], 
             1:[99962.0, 7.0, 14.0, 17.0],
             2:[99905.0, 22.0, 39.0, 34.0]
-            }
+            },
+        'initial_state_lockdown':{
+            '1':[39919.378548, 19.308925, 6.831724, 60054.480803],
+            '1a':[39089.884262,  546.490633,  176.072944,  60187.55216],
+            '2':[29779.445474, 167.879246, 34.196200, 70018.479080],
+            '2a': [29754.266750,  448.504081,  222.612092,  69574.617077]
+        }#[23573.71645,5421.40831,4655.075957,66349.79928]
     }
-    States = GenerateStates(N=int(args['N']/16))
-    for w in args['w_all']:
+    # States = GenerateStates(N=int(args['N']/16))
+    for w in args['sel_w']:
         dir_w = directory + str(w) +"/"
         try:
             os.mkdir(dir_w)
@@ -491,7 +555,7 @@ if __name__ == '__main__':
             # model = train(w, i, args, log_dir=dir_sen)
 
             # Load the trained model
-            model = PPO.load(dir_sen+ "best_model.zip")
+            # model = PPO.load(dir_sen+ "best_model.zip")
 
             # Generate the data
             # data = DataGeneration(w, dir_sen, args, model, States)
@@ -520,6 +584,13 @@ if __name__ == '__main__':
             # Trajectories(w, plots_dir, args, model, inital_state=args['initial_state'][i], Senario=i)
             # end_time = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
             # print(start_time, end_time)
-        Trajectories_Comparision(w, dir_w, args, model)
+        # plot_confusion_matrix(w, dir_w, args)
+        # plot_dir = directory + "comparison/"
+        plot_dir = directory + "comparison_diff_init_a/"
+        try:
+            os.mkdir(plot_dir)
+        except:
+            pass
+        Trajectories_Comparision(w, dir_w, args, plot_dir)
 
 
